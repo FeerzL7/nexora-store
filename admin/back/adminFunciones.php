@@ -1,11 +1,17 @@
 <?php
-
-
+/**
+ * NEXORA - funciones del panel de administracion.
+ *
+ * Todas las funciones que tocan la base de datos reciben la conexion como
+ * parametro. La version anterior usaba "global $con", pero $con era una
+ * variable local del script que las llamaba, asi que dentro de la funcion
+ * siempre llegaba vacia y la consulta tronaba.
+ */
 
 function esNulo(array $parametros)
 {
     foreach ($parametros as $parametro) {
-        if (strlen(trim($parametro)) < 1) {
+        if (strlen(trim((string) $parametro)) < 1) {
             return true;
         }
     }
@@ -14,18 +20,12 @@ function esNulo(array $parametros)
 
 function esEmail($email)
 {
-    if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        return true;
-    }
-    return false;
+    return (bool) filter_var($email, FILTER_VALIDATE_EMAIL);
 }
 
 function validaPassword($password, $repassword)
 {
-    if (strcmp($password, $repassword) === 0) {
-        return true;
-    }
-    return false;
+    return strcmp($password, $repassword) === 0;
 }
 
 function generaToken()
@@ -33,220 +33,98 @@ function generaToken()
     return md5(uniqid(mt_rand(), false));
 }
 
-function registraCliente(array $datos, $con)
-{
-    $sql = $con->prepare("INSERT INTO clientes (nombres, apellidos, email, telefono, estatus, fecha_alta) VALUES (?,?,?,?,1,now())");
-    if ($sql->execute($datos)) {
-        return $con->LastInsertId();
-    }
-    return 0;
-}
-
-function registraUsuario(array $datos, $con)
-{
-    $sql = $con->prepare("INSERT INTO usuarios (usuario, password, activacion, token, id_cliente) VALUES (?,?,1,?,?)");
-    if ($sql->execute($datos)) {
-        return true;
-    }
-    return false;
-}
-
-function usuarioExiste($usuario, $con)
-{
-    $sql = $con->prepare("SELECT id FROM usuarios WHERE usuario LIKE ? LIMIT 1");
-    ($sql->execute([$usuario]));
-    if ($sql->fetchColumn() > 0) {
-        return true;
-    }
-    return false;
-}
-
-function emailExiste($email, $con)
-{
-    $sql = $con->prepare("SELECT id FROM clientes WHERE email LIKE ? LIMIT 1");
-    ($sql->execute([$email]));
-    if ($sql->fetchColumn() > 0) {
-        return true;
-    }
-    return false;
-}
-
-
-
 function mostrarMensajes(array $errors)
 {
-    if (count($errors) > 0) {
-        echo '<div class="alert alert-warning alert-dismissible fade show" role="alert"><ul>';
-        foreach ($errors as $error) {
-            echo '<li>' . $error . '</li>';
-        }
-        echo '</ul>';
-        echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"</button></div>';
+    if (count($errors) === 0) {
+        return;
     }
+
+    echo '<div class="alert alert-warning" role="alert"><ul class="mb-0">';
+    foreach ($errors as $error) {
+        echo '<li>' . htmlspecialchars((string) $error, ENT_QUOTES, 'UTF-8') . '</li>';
+    }
+    echo '</ul></div>';
 }
 
+/** Inicia sesion en el panel. Devuelve un mensaje de error o redirige. */
 function login($usuario, $password, $con)
 {
-    $sql = $con->prepare("SELECT id, usuario, password, nombre FROM admin WHERE usuario LIKE ? AND activo = 1 LIMIT 1");
+    $sql = $con->prepare("SELECT id, usuario, password, nombre FROM admin WHERE usuario = ? AND activo = 1 LIMIT 1");
     $sql->execute([$usuario]);
-    if ($row = $sql->fetch(PDO::FETCH_ASSOC)) {
+    $row = $sql->fetch(PDO::FETCH_ASSOC);
 
-        if (password_verify($password, $row['password'])) {
-            $_SESSION['user_id'] = $row['id'];
-            $_SESSION['user_name'] = $row['nombre'];
-            $_SESSION['user_type'] = 'admin';
-            header('Location: inicio.php');
-            exit;
-        }
+    if ($row && password_verify($password, $row['password'])) {
+        session_regenerate_id(true);            // evita fijacion de sesion
+        $_SESSION['user_id']   = $row['id'];
+        $_SESSION['user_name'] = $row['nombre'];
+        $_SESSION['user_type'] = 'admin';
+        header('Location: inicio.php');
+        exit;
     }
+
     return 'El usuario y/o contraseña son incorrectos.';
 }
 
-function eliminarProducto($id) {
-    global $con; // Usa la conexión global
+/* ---------------- productos ---------------- */
 
-    try {
-        // Sentencia SQL para eliminar el producto por su ID
-        $sql = $con->prepare("DELETE FROM productos WHERE id = :id");
-        $sql->bindParam(':id', $id, PDO::PARAM_INT);
-        
-        // Ejecutar la sentencia
-        if ($sql->execute()) {
-            return true; // Éxito
-        } else {
-            return false; // Falló
-        }
-    } catch (PDOException $e) {
-        echo "Error: " . $e->getMessage();
-        return false;
-    }
-}
-
-function actualizarProducto($id, $nuevoNombre, $nuevoPrecio) {
-    global $con; // Utiliza la conexión global
-
-    try {
-        // Sentencia SQL para actualizar el producto por su ID
-        $sql = $con->prepare("UPDATE productos SET nombre = :nombre, precio = :precio WHERE id = :id");
-        $sql->bindParam(':nombre', $nuevoNombre, PDO::PARAM_STR);
-        $sql->bindParam(':precio', $nuevoPrecio, PDO::PARAM_INT);
-        $sql->bindParam(':id', $id, PDO::PARAM_INT);
-
-        // Ejecutar la sentencia
-        if ($sql->execute()) {
-            return true; // Éxito
-        } else {
-            return false; // Falló
-        }
-    } catch (PDOException $e) {
-        echo "Error: " . $e->getMessage();
-        return false;
-    }
-}
-
-class AdminFunciones
+function listarProductos($con)
 {
-    // Otras funciones de tu clase...
-
-    public function agregarProducto($id, $nombre, $descripcion, $precio, $activo)
-    {
-        try {
-            require 'config/basededatos.php';  // Ajusta la ruta según la estructura de tu proyecto
-            $db = new Database();
-            $con = $db->conectar();
-
-            // Prepara la consulta SQL
-            $sql = $con->prepare("INSERT INTO productos (id, nombre, descripcion, precio, activo) VALUES (:id, :nombre, :descripcion, :precio, :activo)");
-
-            // Bind de los parámetros
-            $sql->bindParam(':id', $id);
-            $sql->bindParam(':nombre', $nombre);
-            $sql->bindParam(':descripcion', $descripcion);
-            $sql->bindParam(':precio', $precio);
-            $sql->bindParam(':activo', $activo);
-
-
-            // Ejecuta la consulta
-            $sql->execute();
-
-            // Cierre de la conexión
-            $con = null;
-
-            return true;
-        } catch (PDOException $e) {
-            // Manejo de errores, puedes personalizar según tus necesidades
-            echo "Error al agregar producto: " . $e->getMessage();
-            return false;
-        }
-    }
-
-    public function actualizarProductoProducto($nombre, $descripcion, $precio)
-    {
-        try {
-            require 'config/basededatos.php';  // Ajusta la ruta según la estructura de tu proyecto
-            $db = new Database();
-            $con = $db->conectar();
-
-            // Prepara la consulta SQL
-            $sql = $con->prepare("UPDATE INTO productos (id, nombre, descripcion, precio, activo) VALUES (:id, :nombre, :descripcion, :precio, :activo)");
-
-            // Bind de los parámetros
-            $sql->bindParam(':id', $id);
-            $sql->bindParam(':nombre', $nombre);
-            $sql->bindParam(':descripcion', $descripcion);
-            $sql->bindParam(':precio', $precio);
-            $sql->bindParam(':activo', $activo);
-
-
-            // Ejecuta la consulta
-            $sql->execute();
-
-            // Cierre de la conexión
-            $con = null;
-
-            return true;
-        } catch (PDOException $e) {
-            // Manejo de errores, puedes personalizar según tus necesidades
-            echo "Error al agregar producto: " . $e->getMessage();
-            return false;
-        }
-    }
-
-    private $db;
-
-    public function __construct() {
-        $this->db = new Database();
-    }
-
-    public function eliminarProducto($id) {
-        $con = $this->db->conectar();
-
-        try {
-            // Preparar la consulta SQL utilizando una declaración preparada
-            $stmt = $con->prepare("DELETE FROM productos WHERE id = ?");
-            
-            // Vincular el parámetro
-            $stmt->bindParam(1, $id, PDO::PARAM_INT);
-
-            // Ejecutar la consulta
-            $stmt->execute();
-
-            // Verificar si algún registro fue afectado
-            if ($stmt->rowCount() > 0) {
-                return true; // Éxito: Producto eliminado correctamente
-            } else {
-                return false; // Fracaso: No se eliminó ningún producto
-            }
-        } catch (PDOException $e) {
-            // Manejar errores de la base de datos
-            echo "Error: " . $e->getMessage();
-            return false;
-        } finally {
-            // Cerrar la conexión
-            $con = null;
-        }
-    }
+    $sql = $con->prepare(
+        "SELECT p.id, p.nombre, p.precio, p.descuento, p.descripcion, p.activo,
+                COALESCE(c.nombre, 'Sin categoría') AS categoria
+         FROM productos p
+         LEFT JOIN categorias c ON c.id = p.id_categoria
+         ORDER BY p.id"
+    );
+    $sql->execute();
+    return $sql->fetchAll(PDO::FETCH_ASSOC);
 }
 
+function obtenerProducto($id, $con)
+{
+    $sql = $con->prepare("SELECT * FROM productos WHERE id = ? LIMIT 1");
+    $sql->execute([$id]);
+    return $sql->fetch(PDO::FETCH_ASSOC);
+}
 
+/** Alta de producto. El id lo asigna MySQL (AUTO_INCREMENT), no el formulario. */
+function agregarProducto($con, $nombre, $descripcion, $precio, $descuento, $id_categoria, $activo)
+{
+    $sql = $con->prepare(
+        "INSERT INTO productos (nombre, descripcion, precio, descuento, id_categoria, activo)
+         VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    return $sql->execute([$nombre, $descripcion, $precio, $descuento, $id_categoria, $activo])
+        ? (int) $con->lastInsertId()
+        : 0;
+}
 
+/** Actualiza un producto. Antes la consulta decia "UPDATE INTO", que no es SQL valido. */
+function actualizarProducto($con, $id, $nombre, $descripcion, $precio, $descuento, $id_categoria, $activo)
+{
+    $sql = $con->prepare(
+        "UPDATE productos
+         SET nombre = ?, descripcion = ?, precio = ?, descuento = ?, id_categoria = ?, activo = ?
+         WHERE id = ?"
+    );
+    $sql->execute([$nombre, $descripcion, $precio, $descuento, $id_categoria, $activo, $id]);
+    return $sql->rowCount() >= 0;
+}
+
+/**
+ * Baja logica: marca activo = 0 en vez de borrar el renglon.
+ * Un DELETE real rompe el historial de cualquier pedido que ya lo incluya.
+ */
+function eliminarProducto($con, $id)
+{
+    $sql = $con->prepare("UPDATE productos SET activo = 0 WHERE id = ?");
+    $sql->execute([$id]);
+    return $sql->rowCount() > 0;
+}
+
+function listarCategorias($con)
+{
+    $sql = $con->prepare("SELECT id, nombre FROM categorias WHERE activo = 1 ORDER BY nombre");
+    $sql->execute();
+    return $sql->fetchAll(PDO::FETCH_ASSOC);
+}

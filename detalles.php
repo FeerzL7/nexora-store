@@ -1,87 +1,133 @@
 <?php
 require 'config/config.php';
 require 'config/basededatos.php';
-$db = new Database();
+require 'back/carritoLista.php';
+require 'back/piezas.php';
+
+$db  = new Database();
 $con = $db->conectar();
-$id = isset($_GET['id']) ? $_GET['id'] : '';
 
-if ($id == '') {
-    echo 'Error al procesar la peticion';
-    exit;
-} else {
-    $sql = $con->prepare("SELECT count(id) FROM productos WHERE id=? AND activo=1");
+$id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+$producto = false;
+if ($id) {
+    $sql = $con->prepare(
+        "SELECT p.id, p.nombre, p.descripcion, p.precio, p.descuento, p.id_categoria,
+                COALESCE(c.nombre, 'Catálogo') AS categoria
+         FROM productos p
+         LEFT JOIN categorias c ON c.id = p.id_categoria
+         WHERE p.id = ? AND p.activo = 1 LIMIT 1"
+    );
     $sql->execute([$id]);
-    if ($sql->fetchColumn() > 0) {
-        $sql = $con->prepare("SELECT nombre, descripcion, precio, descuento FROM productos WHERE id=? AND activo=1
-        LIMIT 1");
-        $sql->execute([$id]);
-        $row = $sql->fetch(PDO::FETCH_ASSOC);
-        $nombre = $row['nombre'];
-        $descripcion = $row['descripcion'];
-        $precio = $row['precio'];
-        $descuento = $row['descuento'];
-        $precio_desc = $precio - (($precio * $descuento) / 100);
-        $dir_images = 'image/productos/' . $id . '/';
+    $producto = $sql->fetch(PDO::FETCH_ASSOC);
+}
 
-        $rutaImg = $dir_images . 'principal.webp';
+$relacionados = [];
 
-        if (!file_exists($rutaImg)) {
-            $rutaImg = 'image/no-photo.webp';
-        }
-        $images = array();
-        if (file_exists($dir_images)) {
-            $dir = dir($dir_images);
+if (!$producto) {
+    http_response_code(404);
+    $titulo = 'Producto no encontrado | NEXORA';
+} else {
+    $titulo      = $producto['nombre'] . ' | NEXORA';
+    $descripcion = recorta($producto['descripcion'], 150);
+    $final       = precioFinal($producto['precio'], $producto['descuento']);
 
-            while (($archivo = $dir->read()) != false) {
-                if ($archivo != 'principal.webp' && (strpos($archivo, 'webp') || strpos($archivo, 'webp'))) {
-                    $imagenes[] = $dir_images . $archivo;
-                }
+    // Galería: cualquier otro .webp dentro de la carpeta del producto.
+    $imagenes   = [];
+    $dir_images = 'image/productos/' . (int) $producto['id'] . '/';
+    if (is_dir($dir_images)) {
+        foreach (scandir($dir_images) as $archivo) {
+            if ($archivo !== 'principal.webp' && strtolower(pathinfo($archivo, PATHINFO_EXTENSION)) === 'webp') {
+                $imagenes[] = $dir_images . $archivo;
             }
         }
     }
+
+    $sql = $con->prepare(
+        "SELECT id, nombre, precio, descuento, id_categoria
+         FROM productos WHERE activo = 1 AND id_categoria = ? AND id <> ?
+         ORDER BY RAND() LIMIT 4"
+    );
+    $sql->execute([$producto['id_categoria'], $producto['id']]);
+    $relacionados = $sql->fetchAll(PDO::FETCH_ASSOC);
 }
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SportZone</title>
-    <link rel="stylesheet" href="css/styles.css">
-    <link rel="icon" href="image/logo.png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@100;200;300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/boxicons@latest/css/boxicons.min.css">
-</head>
+<head><?php include 'back/cabeza.php'; ?></head>
 
 <body>
     <?php include 'header.php'; ?>
-    <div class="detalles-content container">
-        <div class="detalles-img">
-            <img src="<?php echo $rutaImg; ?>" alt="">
-        </div>
-        <div class="detalles-txt">
-            <h4><?php echo $nombre; ?></h4>
-            <?php if ($descuento > 0) { ?>
-                <p><del><?php echo PRECIO . number_format($precio, 2, '.', ','); ?></del></p>
-                <h4>
-                    <?php echo PRECIO . number_format($precio_desc, 2, '.', ','); ?>
-                    <small class="text-success"><?php echo $descuento; ?>% descuento</small>
-                </h4>
-            <?php } else { ?>
-                <h4><?php echo PRECIO . number_format($precio, 2, '.', ','); ?></h4>
+
+    <?php if (!$producto) { ?>
+        <main class="pagina contenedor">
+            <div class="sin-nada">
+                <h1 class="pagina__titulo">Esta pieza ya no está</h1>
+                <p>El enlace apunta a un producto que se agotó o se dio de baja. El catálogo completo sigue aquí.</p>
+                <a class="boton" href="index.php#catalogo">Ver catálogo</a>
+            </div>
+        </main>
+    <?php } else { ?>
+        <main class="contenedor">
+            <div class="ficha">
+                <div class="ficha__galeria">
+                    <div class="ficha__principal">
+                        <img src="<?php echo e(imagenProducto($producto['id'])); ?>"
+                             alt="<?php echo e($producto['nombre']); ?>">
+                    </div>
+                    <?php if ($imagenes) { ?>
+                        <div class="ficha__miniaturas">
+                            <?php foreach ($imagenes as $img) { ?>
+                                <img src="<?php echo e($img); ?>" alt="<?php echo e($producto['nombre']); ?>" loading="lazy">
+                            <?php } ?>
+                        </div>
+                    <?php } ?>
+                </div>
+
+                <div>
+                    <p class="ficha__migas">
+                        <a href="index.php#catalogo">Catálogo</a> /
+                        <a href="index.php?categoria=<?php echo (int) $producto['id_categoria']; ?>#catalogo"><?php echo e($producto['categoria']); ?></a>
+                    </p>
+
+                    <h1 class="ficha__titulo"><?php echo e($producto['nombre']); ?></h1>
+
+                    <p class="ficha__precio">
+                        <?php echo PRECIO . number_format($final, 2, '.', ','); ?>
+                        <?php if ($producto['descuento'] > 0) { ?>
+                            <del><?php echo PRECIO . number_format($producto['precio'], 2, '.', ','); ?></del>
+                            <span class="ficha__etiqueta"><?php echo (int) $producto['descuento']; ?>% menos</span>
+                        <?php } ?>
+                    </p>
+
+                    <p class="ficha__descripcion"><?php echo nl2br(e($producto['descripcion'])); ?></p>
+
+                    <div class="ficha__acciones">
+                        <button class="boton" type="button"
+                                onclick="addProducto(<?php echo (int) $producto['id']; ?>, '<?php echo e(addslashes($producto['nombre'])); ?>')">
+                            Agregar al carrito
+                        </button>
+                        <a class="boton boton--fantasma" href="carrito.php">Ir al carrito</a>
+                    </div>
+                </div>
+            </div>
+
+            <?php if ($relacionados) { ?>
+                <section class="seccion">
+                    <div class="seccion__encabezado">
+                        <h2 class="seccion__titulo">Combina con</h2>
+                    </div>
+                    <div class="rejilla">
+                        <?php foreach ($relacionados as $row) { pintarPieza($row); } ?>
+                    </div>
+                </section>
             <?php } ?>
-            <p>
-                <?php echo $descripcion ?>
-            </p>
-            <button class="boton-2" type="button" onclick="addProducto(<?php echo $id; ?>)">Agregar al Carrito</button>
-        </div>
-    </div>
+        </main>
+    <?php } ?>
+
     <?php include 'footer.php'; ?>
-    <script src="js/script.js"></script>
+    <script src="<?php echo recurso('js/script.js'); ?>"></script>
 </body>
 
 </html>

@@ -1,61 +1,45 @@
 <?php
-
+// Actualiza la cantidad de una linea del carrito o la elimina. Responde JSON.
 require '../config/config.php';
 require '../config/basededatos.php';
+require 'carritoLista.php';
 
-if(isset($_POST['action'])){
-    $action = $_POST['action'];
-    $id = isset($_POST['id']) ? $_POST['id'] : 0;
+header('Content-Type: application/json; charset=utf-8');
 
-    if($action == 'agregar'){
-        $cantidad = isset($_POST['cantidad']) ? $_POST['cantidad'] : 0;
-        $respuesta = agregar($id, $cantidad);
-        if($respuesta>0){
-            $datos['ok'] = true;
-        }else{
-            $datos['ok'] = false;
-        }
-        $datos['sub'] = PRECIO . number_format($respuesta, 2, '.', ',');
-    }else if($action == 'eliminar'){
-        $datos['ok'] = eliminar($id);
-    } else{
-        $datos['ok'] = false;
+$db  = new Database();
+$con = $db->conectar();
+
+$datos  = ['ok' => false];
+$action = $_POST['action'] ?? '';
+$id     = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+if ($action === 'agregar' && $id) {
+    $cantidad = filter_input(INPUT_POST, 'cantidad', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 10]]);
+
+    if ($cantidad && isset($_SESSION['carrito']['productos'][$id])) {
+        $_SESSION['carrito']['productos'][$id] = $cantidad;
+        $datos['ok'] = true;
     }
-}else{
-    $datos['ok'] = false;
+} elseif ($action === 'eliminar' && $id) {
+    if (isset($_SESSION['carrito']['productos'][$id])) {
+        unset($_SESSION['carrito']['productos'][$id]);
+        $datos['ok'] = true;
+    }
+}
+
+// El servidor recalcula y devuelve los importes: el navegador ya no los suma solo,
+// asi no se puede desincronizar del carrito real.
+$lista = obtenerCarrito($con);
+$total = totalCarrito($lista);
+
+$datos['sub']    = PRECIO . '0.00';
+$datos['total']  = PRECIO . number_format($total, 2, '.', ',');
+$datos['numero'] = array_sum($_SESSION['carrito']['productos'] ?? []);
+
+foreach ($lista as $linea) {
+    if ((int) $linea['id'] === (int) $id) {
+        $datos['sub'] = PRECIO . number_format($linea['subtotal'], 2, '.', ',');
+    }
 }
 
 echo json_encode($datos);
-
-function agregar($id, $cantidad){
-    $res = 0;
-    if($id > 0 && $cantidad > 0 && is_numeric(($cantidad))){
-        if(isset($_SESSION['carrito']['productos'][$id])){
-            $_SESSION['carrito']['productos'][$id] = $cantidad;
-
-            $db = new DataBase();
-            $con = $db->conectar();
-            $sql = $con->prepare("SELECT precio FROM productos WHERE id=? AND activo=1 LIMIT 1");
-            $sql->execute([$id]);
-            $row = $sql->fetch(PDO::FETCH_ASSOC);
-            $precio = $row['precio'];
-            $res = $cantidad * $precio;
-
-            return $res;
-        }
-    }else{
-        return $res;
-    }
-}
-
-function eliminar($id){
-    if($id > 0){
-        if(isset($_SESSION['carrito']['productos'][$id])){
-            unset($_SESSION['carrito']['productos'][$id]);
-            return true;
-        }
-    }else{
-        return false;
-    }
-}
-?>

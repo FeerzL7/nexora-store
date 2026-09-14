@@ -2,18 +2,21 @@
 require_once '../config/basededatos.php';
 require_once 'validacionesCliente.php';
 
-$datos = [];
+header('Content-Type: application/json; charset=utf-8');
+
+$datos = ['ok' => false];
+
 if (isset($_POST['action'])) {
-    $action = $_POST['action'];
-    $db = new Database();
+    $db  = new Database();
     $con = $db->conectar();
-    if ($action == 'existeUsuario') {
-        $datos['ok'] = usuarioExiste($_POST['usuario'], $con);
-    } elseif ($action = 'existeEmail') {
-        $datos['ok'] = emailExiste($_POST['email'], $con);
+
+    // Comparacion con == : antes decia "=" (asignacion), por lo que la rama
+    // de email siempre se ejecutaba sin importar la accion recibida.
+    if ($_POST['action'] === 'existeUsuario') {
+        $datos['ok'] = usuarioExiste($_POST['usuario'] ?? '', $con);
+    } elseif ($_POST['action'] === 'existeEmail') {
+        $datos['ok'] = emailExiste($_POST['email'] ?? '', $con);
     }
 }
 
-echo json_Encode($datos)
-
-?>
+echo json_encode($datos);

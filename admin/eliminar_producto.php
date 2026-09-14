@@ -1,46 +1,67 @@
 <?php
-
-require 'back/adminFunciones.php';
+require 'back/sesion.php';
 require 'config/basededatos.php';
-$db = new Database();
+require 'back/adminFunciones.php';
+
+$db  = new Database();
 $con = $db->conectar();
 
+$errors    = [];
+$eliminado = false;
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Verificar si el campo 'id' está presente en la solicitud
-    if (isset($_POST['id'])) {
-        $id = $_POST['id'];
+    $id = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 
-        // Llamar a una función para eliminar el producto por su ID
-        $eliminado = eliminarProducto($id);
-
-        if ($eliminado) {
-            echo "Producto eliminado correctamente.";
-        } else {
-            echo "Error al eliminar el producto.";
-        }
+    if (!$id) {
+        $errors[] = "Indica un ID de producto válido.";
+    } elseif (!obtenerProducto($id, $con)) {
+        $errors[] = "No existe ningún producto con el ID $id.";
     } else {
-        echo "El campo 'id' es requerido para la eliminación.";
+        $eliminado = eliminarProducto($con, $id);
+        if (!$eliminado) {
+            $errors[] = "El producto ya estaba dado de baja.";
+        }
     }
-} else {
-    echo "Acceso no permitido.";
 }
 
+$productos = listarProductos($con);
 ?>
-
 <?php include 'header.php'; ?>
 <main>
     <div class="container-fluid px-4">
-    <div class="container">
-            <h3>Eliminar Producto</h3>
-            <form class="row g-3" action="" method="post" autocomplete="off">
-                <div class="col-md-6">
-                    <label for="id">id</label>
-                    <input type="number" min="1" max="10" step="1" name="id" id="id" class="form-control" required>
-                </div>
-                <div class="col-12">
-                    <button type="submit" class="btn btn-primary">Eliminar Producto</button>
-                </div>
-            </form>
+        <h1 class="mt-4">Dar de baja un producto</h1>
+
+        <?php mostrarMensajes($errors); ?>
+        <?php if ($eliminado) { ?>
+            <div class="alert alert-success">Producto dado de baja. Ya no aparece en la tienda.</div>
+        <?php } ?>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <p class="text-muted">
+                    El producto se marca como inactivo, no se borra de la base de datos.
+                    Puedes reactivarlo desde <em>Actualizar</em>.
+                </p>
+                <form class="row g-3" action="eliminar_producto.php" method="post" autocomplete="off"
+                      onsubmit="return confirm('¿Dar de baja este producto?');">
+                    <div class="col-md-6">
+                        <label for="id" class="form-label">Producto</label>
+                        <select name="id" id="id" class="form-control" required>
+                            <option value="">Selecciona…</option>
+                            <?php foreach ($productos as $p) {
+                                if (!$p['activo']) continue; ?>
+                                <option value="<?php echo (int) $p['id']; ?>">
+                                    <?php echo (int) $p['id'] . ' — ' . e($p['nombre']); ?>
+                                </option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-danger">Dar de baja</button>
+                        <a href="inicio.php" class="btn btn-secondary">Volver</a>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 </main>

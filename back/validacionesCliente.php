@@ -2,7 +2,7 @@
 
 function esNulo(array $parametros){
     foreach($parametros as $parametro){
-        if(strlen(trim($parametro)) < 1){
+        if(strlen(trim((string) $parametro)) < 1){
             return true;
         }
     }
@@ -67,13 +67,13 @@ function emailExiste($email, $con){
 
 function mostrarMensajes(array $errors){
     if(count($errors) > 0){
-        echo '<div class="alert alert-warning alert-dismissible fade show" role="alert"><ul>';
+        echo '<div class="aviso" role="alert"><ul>';
         foreach($errors as $error){
-            echo '<li>'. $error .'</li>';
+            echo '<li>' . htmlspecialchars((string) $error, ENT_QUOTES, 'UTF-8') . '</li>';
 
         }
         echo '</ul>';
-        echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"</button></div>';
+        echo '</div>';
     }
 }
 
@@ -83,11 +83,12 @@ function login($usuario, $password, $con, $proceso){
     if($row = $sql->fetch(PDO::FETCH_ASSOC)){
         if(esActivo($usuario, $con)){
             if(password_verify($password, $row['password'])){
+                session_regenerate_id(true);
                 $_SESSION['user_id'] = $row['id'];
                 $_SESSION['user_name'] = $row['usuario'];
                 $_SESSION['user_cliente'] = $row['id_cliente'];
                 if($proceso == 'pago'){
-                    header("Location: checkout.php");
+                    header("Location: realizarpago.php");
                 }else{
                     header("Location: index.php");
                 }
